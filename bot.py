@@ -1,5 +1,4 @@
 from aiogram import Bot
-from aiogram import Bot
 from aiogram import types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import Dispatcher, FSMContext
@@ -24,6 +23,7 @@ class MassSend(StatesGroup):
     sendd1 = State()
     sendd2 = State()
 
+
 class saveMessage(StatesGroup):
     sv_mess1 = State()
     sv_mess2 = State()
@@ -32,6 +32,15 @@ class saveMessage(StatesGroup):
 
 class welcomePost(StatesGroup):
     wl_post1 = State()
+
+
+class buttonText(StatesGroup):
+    b_text = State()
+    b_text1 = State()
+
+
+class buttonAdd(StatesGroup):
+    b_add = State()
 
 
 @dp.message_handler(commands='start', user_id=config.ADMIN_ID)
@@ -59,7 +68,7 @@ async def chat_join_request_handler(chat_join_request: types.ChatJoinRequest):
                            reply_markup=button.confirm())
 
 
-@dp.message_handler(lambda message: message.text == "Подтвердить вход")
+@dp.message_handler(lambda message: message.text in db.handler_button_words())
 async def approve_join_request(message: types.Message):
     print(f'DB input - {db.inpt(message.chat.id)}')
     data = db.inpt(message.chat.id)
@@ -108,10 +117,66 @@ async def save_sample(message: types.Message, state: FSMContext):
     await state.finish()
 
 
+@dp.message_handler(text='Добавить кнопку (только первое включение)', state=None, user_id=config.ADMIN_ID)
+async def button_add(message: types.Message):
+    await bot.send_message(message.from_user.id, text=f"* Добавить кнопок можно всего 4 шт *\n"
+                                                      f"* Эта функция делается только при первом включении бота *\n"
+                                                      f"* В дальнейшем просто редактируйте их текст *")
+    await buttonAdd.b_add.set()
+    await bot.send_message(message.from_user.id, text=f"Введите текст кнопки:")
+
+
+@dp.message_handler(state=buttonAdd.b_add)
+async def button_add(message: types.Message, state: FSMContext):
+    text = message.text
+    if db.add_button(text):
+        await state.finish()
+        await bot.send_message(message.from_user.id, text=f"Добавлена кнопка '{text}'",
+                               reply_markup=button.main_menu())
+    else:
+        await state.finish()
+        await bot.send_message(message.from_user.id, text=f"Достигнут лимит кнопок (4 штуки)",
+                               reply_markup=button.main_menu())
+
+
+@dp.message_handler(text='Изменить текст кнопок', state=None, user_id=config.ADMIN_ID)
+async def button_txt_edit(message: types.Message, state: FSMContext):
+    if db.get_button():
+        await bot.send_message(message.from_user.id, text=f"Введите ID кнопки:")
+        for i in db.get_button():
+            await bot.send_message(message.chat.id, text=f'ID: {i[0]}\n'
+                                                         f'Текст кнопки: {i[1]}')
+        await buttonText.b_text.set()
+    else:
+        await bot.send_message(message.from_user.id, text=f"Кнопок не создано")
+
+
+@dp.message_handler(state=buttonText.b_text)
+async def button_id_save(message: types.Message, state: FSMContext):
+    number = message.text
+    if number.isdigit():
+        async with state.proxy() as data:
+            data['button_id'] = number
+        await bot.send_message(message.chat.id, text='Теперь введите текст: ')
+        await buttonText.next()
+    else:
+        await state.finish()
+        await bot.send_message(message.chat.id, text='Вы ввели не цифру!', reply_markup=button.main_menu())
+
+
+@dp.message_handler(state=buttonText.b_text1)
+async def button_txt_save(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        button_id = data.get('button_id')
+    button_text = message.text
+    db.update_button_text(button_id, button_text)
+    await state.finish()
+    await bot.send_message(message.chat.id, text='Текст кнопки успешно изменен 👍', reply_markup=button.main_menu())
+
+
 @dp.message_handler(text='Рассылка', state=None, user_id=config.ADMIN_ID)
 async def sample(message: types.Message, state: FSMContext):
     await bot.send_message(message.from_user.id, text=f"Введите ID шаблона для отправки:")
-    print(db.get_message())
     if db.get_message():
         for i in db.get_message():
             await bot.send_message(message.chat.id, text=f'ID: {i[0]}\n'
@@ -120,7 +185,6 @@ async def sample(message: types.Message, state: FSMContext):
     else:
         await state.finish()
         await bot.send_message(message.chat.id, text='Вы не добавили ни одного шаблона')
-
 
 
 @dp.message_handler(state=MassSend.sendd1)
